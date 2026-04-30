@@ -1,0 +1,28 @@
+# Terraform
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfplan
+tfplan.json
+override.tf
+override.tf.json
+crash.log
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+dist/
+.pytest_cache/
+.coverage
+.ruff_cache/
+
+# Secrets — never commit
+.env
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
