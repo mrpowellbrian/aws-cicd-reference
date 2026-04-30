@@ -19,6 +19,12 @@ dist/
 .coverage
 .ruff_cache/
 
+# Lambda deployment package — generated artifact
+*.zip
+
+# Local Terraform backend config — contains bucket name, never commit
+infra/backend.hcl
+
 # Secrets — never commit
 .env
 *.pem

@@ -1,0 +1,4 @@
+# Copy to backend.hcl (gitignored) for local development.
+# The CI workflow injects these values via -backend-config flags.
+bucket         = "tfstate-YOUR_ACCOUNT_ID-us-east-1"
+dynamodb_table = "terraform-state-lock"
