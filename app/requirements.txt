@@ -1,0 +1,3 @@
+# Runtime dependencies for the Lambda function.
+# Empty: the handler uses stdlib only (json, logging, datetime, os).
+# Pin any future dependencies here with exact versions.
