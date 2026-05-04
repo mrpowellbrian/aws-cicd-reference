@@ -14,3 +14,46 @@ jobs:
     uses: ./.github/workflows/_lint-test.yml
     permissions:
       contents: read
+
+  security-scan:
+    name: Security scan (Checkov)
+    runs-on: ubuntu-latest
+    # Run in parallel with lint-test — findings are independent of lint results.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      - name: Setup Python
+        uses: actions/setup-python@0b93645e9fea7318ecaed2b359559ac225c90a2b  # v5.3.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Checkov
+        run: pip install --quiet checkov>=3.2,<4
+
+      # Scan Terraform. checkov:skip annotations in .tf files handle known
+      # intentional deviations (DLQ, VPC, code signing). Any unannotated
+      # HIGH or CRITICAL finding blocks the PR.
+      - name: Checkov — infra/
+        run: |
+          checkov \
+            --directory infra/ \
+            --framework terraform \
+            --hard-fail-on HIGH,CRITICAL \
+            --compact \
+            --quiet
+
+      # Scan GitHub Actions workflows. Catches misconfigured permissions,
+      # unpinned actions, and dangerous workflow patterns (e.g. script
+      # injection via PR title in run: steps).
+      - name: Checkov — .github/workflows/
+        run: |
+          checkov \
+            --directory .github/workflows/ \
+            --framework github_actions \
+            --hard-fail-on HIGH,CRITICAL \
+            --compact \
+            --quiet
