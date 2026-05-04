@@ -83,3 +83,76 @@ jobs:
         run: |
           url=$(terraform output -raw api_endpoint)
           echo "url=${url}" >> "$GITHUB_OUTPUT"
+
+  smoke-test:
+    name: Smoke test
+    runs-on: ubuntu-latest
+    needs: apply
+    permissions:
+      contents: read
+    env:
+      API_URL: ${{ needs.apply.outputs.api_endpoint }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683  # v4.2.2
+
+      # Give API Gateway a moment after apply before hitting it. Lambda cold
+      # starts on a brand-new function can take 2–3 seconds; 10s is
+      # conservative and adds negligible pipeline time.
+      - name: Wait for endpoint to become ready
+        run: sleep 10
+
+      - name: GET / — assert 200
+        id: probe
+        run: |
+          response=$(curl \
+            --silent \
+            --show-error \
+            --fail-with-body \
+            --max-time 15 \
+            --write-out "\n%{http_code}" \
+            "${API_URL}/")
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | head -n -1)
+
+          echo "HTTP status: ${http_code}"
+          echo "Body: ${body}"
+          echo "http_code=${http_code}" >> "$GITHUB_OUTPUT"
+          echo "body=${body}"          >> "$GITHUB_OUTPUT"
+
+          if [[ "${http_code}" != "200" ]]; then
+            echo "Expected HTTP 200, got ${http_code}" >&2
+            exit 1
+          fi
+
+      - name: Assert response is valid JSON
+        run: |
+          body='${{ steps.probe.outputs.body }}'
+          echo "${body}" | jq empty || {
+            echo "Response is not valid JSON" >&2
+            exit 1
+          }
+
+      - name: Assert expected fields present
+        run: |
+          body='${{ steps.probe.outputs.body }}'
+          for field in message path method version timestamp; do
+            value=$(echo "${body}" | jq -r ".${field} // empty")
+            if [[ -z "${value}" ]]; then
+              echo "Missing or null field: ${field}" >&2
+              exit 1
+            fi
+          done
+          echo "All expected fields present"
+
+      - name: Assert message is ok
+        run: |
+          body='${{ steps.probe.outputs.body }}'
+          message=$(echo "${body}" | jq -r '.message')
+          if [[ "${message}" != "ok" ]]; then
+            echo "Expected message='ok', got '${message}'" >&2
+            exit 1
+          fi
+          echo "Smoke test passed"
