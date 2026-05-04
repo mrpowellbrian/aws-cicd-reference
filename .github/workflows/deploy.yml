@@ -156,3 +156,92 @@ jobs:
             exit 1
           fi
           echo "Smoke test passed"
+
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    # Always run — we want a failure notification even when smoke-test fails.
+    needs: [apply, smoke-test]
+    if: always()
+    permissions:
+      contents: read
+
+    steps:
+      - name: Determine deploy status
+        id: status
+        run: |
+          apply_result="${{ needs.apply.result }}"
+          smoke_result="${{ needs.smoke-test.result }}"
+
+          if [[ "${apply_result}" == "success" && "${smoke_result}" == "success" ]]; then
+            echo "result=success" >> "$GITHUB_OUTPUT"
+            echo "color=good"     >> "$GITHUB_OUTPUT"
+            echo "icon=✅"        >> "$GITHUB_OUTPUT"
+          else
+            echo "result=failure" >> "$GITHUB_OUTPUT"
+            echo "color=danger"   >> "$GITHUB_OUTPUT"
+            echo "icon=❌"        >> "$GITHUB_OUTPUT"
+          fi
+
+      # Posts a Slack-compatible webhook message. To wire to Slack:
+      #   1. Create an incoming webhook: Slack → Apps → Incoming Webhooks → Add New
+      #   2. Add the webhook URL as repository secret NOTIFY_WEBHOOK_URL
+      #   3. That's it — the payload format is compatible with Slack out of the box.
+      #
+      # To wire to other systems (Teams, PagerDuty, generic HTTP):
+      #   Adjust the JSON payload shape below to match the target API.
+      - name: Post webhook notification
+        env:
+          WEBHOOK_URL: ${{ secrets.NOTIFY_WEBHOOK_URL }}
+        run: |
+          status="${{ steps.status.outputs.result }}"
+          icon="${{ steps.status.outputs.icon }}"
+          color="${{ steps.status.outputs.color }}"
+          sha="${{ github.sha }}"
+          short_sha="${sha:0:7}"
+          run_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          actor="${{ github.actor }}"
+          repo="${{ github.repository }}"
+
+          payload=$(jq -n \
+            --arg icon    "$icon" \
+            --arg status  "$status" \
+            --arg repo    "$repo" \
+            --arg sha     "$short_sha" \
+            --arg actor   "$actor" \
+            --arg run_url "$run_url" \
+            --arg color   "$color" \
+            '{
+              text: "\($icon) Deploy \($status) — \($repo)@\($sha)",
+              attachments: [{
+                color: $color,
+                fields: [
+                  { title: "Repository", value: $repo,    short: true },
+                  { title: "Commit",     value: $sha,     short: true },
+                  { title: "Triggered by", value: $actor, short: true },
+                  { title: "Run",        value: $run_url, short: false }
+                ]
+              }]
+            }')
+
+          if [[ -z "${WEBHOOK_URL}" ]]; then
+            echo "NOTIFY_WEBHOOK_URL is not set — skipping notification"
+            echo "Payload that would have been sent:"
+            echo "${payload}" | jq .
+            exit 0
+          fi
+
+          http_code=$(curl \
+            --silent \
+            --output /dev/null \
+            --write-out "%{http_code}" \
+            --max-time 10 \
+            --header "Content-Type: application/json" \
+            --data "${payload}" \
+            "${WEBHOOK_URL}")
+
+          echo "Webhook response: ${http_code}"
+          if [[ "${http_code}" != "200" ]]; then
+            echo "Webhook POST failed with status ${http_code}" >&2
+            exit 1
+          fi
